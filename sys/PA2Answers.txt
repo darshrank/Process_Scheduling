@@ -1,0 +1,54 @@
+1. (10 pts) What are the advantages and disadvantages of each of the two scheduling policies? Also, give the advantages and disadvantages of the round-robin scheduling policy originally implemented in Xinu.
+
+=> Exponential Distribution Scheduler
+
+-> Advantages:
+- Tunable starvation prevention: The primary strength of this scheduler is prevention of starvation. By using lambda = 0.1 as told in this project, the scheduler ensures that lower priority processes have high chances of being selected. This solves the problem of strict priority based schedulers where high-priority tasks can indefinitely block lower priority ones.
+- Probabilistic fairness: The policy introduces a form of fairness where every process gets a chance to run. By tuning the value of lambda, we can adjust the probability distribution which in turn allows the system designer to control how heavilythe scheduler should favour low-priority tasks.
+- Low State Overhead: When compared to more complex schedulers like the Linux-like scheduler, this algorithm turns out to be more simpler and more 'stateless'. The scheduling decision is based only on ready queue and a random number. This results in lower implemenation complexity and avoids a global "epoch change" where all process priorities(goodness) would be recalculated.
+
+-> Disadvantages:
+- Counter Intuitive Priority Handling: This policy is counter intuitive and lambda plays a critical role here. The main drawback is the inversion of traditional priority and it is highly dependent on lambda.
+    For small lambda(0.1 as in the project), we get a probabilistic mix where lower-priority processes run more often, but higher priority ones are not completely ignored. This is priority inversion.
+    With Large Lambda (say 0.9), the scheduler becomes more extreme and almost always picks the lower priority process. This happens because the random value generated would almost always be close to zero. This causes the scheduler to almost always pick the process with the lowest priority 
+        and thus makes itself behave like a lowest-priority first scheduler and effectively starves all the higher priority processes. Thus the system's performance is highly sensitive to lambda and it is necessary to choose an appropriate value.
+- Non Determinism: since the scheduler's behaviour is probabilistic, we cant guarantee which process runs next and can only predict the long term statistical average. This is not suitable for real time systems where deadlines are critical. The choice of lambda can only change the probabilities but cannot remove randomness.
+- Performance Overhead: The use of floating point math and a call to expdev() on each reschedule adds more overhead than an integer or comparison based simple scheduler. This can be significant in high-frequency scheduling environment.
+
+=> Linux-like Scheduler
+-> Advantages:
+- Guaranteed Fairness and Starvation Prevention: The idea of "epoch" is the core advantage of this scheduling policy. Since the goodness of a process becomes 0 after its quantum is exhausted, it cannot run again in the same epoch again. This guarantees that the least priority process will eventually get CPU time once all higher-goodness processes have run; this effectively prevents starvation.
+- Prioritization of Interactive I/O Bound Processes: The quantum carry-over (quantum = priority + floor(unused_quantum / 2)) improves overall system responsiveness. Processes that yield before using up their quantum (eg. tasks waiting on user input or disk I/O) are rewarded with larger quantum and thus a higher goodness value in next epoch. This makes those processes more likely to be scheduled quickly when they are ready again.
+- Determinism: In each epoch, the scheduler is completely deterministic. It always selects the ready process with highest goodness value to run first. This makes the system's initial short-term behavioour easy to analyze and debug and reason about the selection.
+
+-> Disadvantages:
+- Higher Complexity and State Overhead: This scheduling policy is more complex to implement and manage. It requires adding and tracking 3 additional state variables (quantum, counter and goodness) for every process. This increases the memory footprint of each process.
+- Computational Overhead at Epoch Boundaries: The start of each new epoch is computationally expensive since the scheduler iterates through every process in the proctab to recalculate quantum and goodness irrespective of process being ready or not. This introduces overhead or scheduling latency, more visible in systems with large number of processes.
+- Less Granular Control than Modern Schedulers: While complex, it is still simple compared to modern standards. All processes are teated as conventional and lacks features like real time scheduling classes, process grouping or complex heuristics for identifying interactive tasks. This can lead to prioritization of CPU bound non interactive process over genuinely interactive ones.
+
+=> Round-Robin Scheduler (Default Xinu Scheduler)
+-> Advantages
+- Strict Priority Enforcement: The scheduler guarantees that the highest priority task is the one that runs. It is critical for real-time requirements, where urgent tasks should be prioritized and preempt less important ones.
+- Simplicity and low overhead: This is the greatest advantage. The scheduling logic is simple, involving some integer compares and basic queue operations. Thus it is very fast with minimal computatinal overhead on each context switch.
+- Determinism: behaviour is completely deterministic. Highest priority ready process runs first. This makes it easy to reason about performance and response time.
+
+-> Disadvantages
+- Starvation Prone: The most significant drawback is that it is prone to starvation. A lower priority process will never get a chance to run as long as there is atleast 1 higher priority process in ready state. A stream of high priority tasks can lead to starvation of lower priority tasks.
+- No fairness or proportional sharing: There's no attempt to be fair here. CPU time is not shared proportionally. This is inefficient for general computing systems where we want all processes to make progress.
+- Poor Performance for interactive systems: A long running CPU bound task with a high priority can completely lock up the systems from the user's perspective by starving the lower priority processes responsible for handling user input. This makes the system feel unresponsive for the user.
+
+2. (10 pts) Describe how each scheduling algorithm ensures that the NULL process only ever runs when there are no other eligible processes.
+
+=> Default Round-Robin Scheduler
+- Mechanism: The scheduling policy retrieves the highest priority process by using the getlast(rdytail) function. If the ready queue contains any process the function will then return its process ID (well it returns the pid of max priority function but not NULLPROC id 0).
+- Thus the NULL process is chosen by default only when the ready queue is empty.  
+
+=> Exponential Distribution Scheduler
+- Mechanism: This scheduling policy handles NULL process implicitly by its queue traversal logic. When the scheduler traverses the ready queue, if the queue is empty the condition candidate!=rdytail in while loop returns false and code process to candidate==rdytail block. Inside this block, getlast(rdytail) is called. This return pid of NULLPROC only when the queue is empty i.e. no process are available.
+- The NULL process is scheduled as fallback in this policy when it cannot find any suitable candidates. This is guaranteed to happen if the queue is empty.
+
+=> Linux-like Scheduler
+- Mechanism: This scheduling policy ensures that the NULL process runs only when the ready queue is empty, using a two-stage search process for eligible runnable candidate which involves epochs. The scheduler first seacher for a ready process with goodness>0. If it fails to find one, it starts a new epoch and does not run NULL process. When new epoch starts the quantum, goodness are recalculated for all processes. After this there is one more check to find the max_goodness process now. Now if the max_goodness still remains zero only then the scheduler starts NULLPROC, this means that the ready queue is completely empty.
+- The NULL process is chosen only after the scheduler confirms that there are no ready processes, even after attempting to start a new epoch. It is a fallback of last resort used only when the system is truly idle.
+
+In all three cases, the core principle is the same: the scheduler first attempts to find a valid, eligible user process. The NULL process is the designated fallback that is only chosen when this attempt fails, ensuring it runs only when the system would otherwise be idle.
